@@ -9,54 +9,56 @@ import (
 	"github.com/streadway/amqp"
 )
 
-// ConsumeMotionQueue se conecta a RabbitMQ, consume mensajes de la cola "esp32"
-// y los reenvía al endpoint /sensor/motion de tu API.
 func ConsumeMotionQueue() {
 	rabbitURL := os.Getenv("RABBIT_URL")
 	secondAPIURL := os.Getenv("SECOND_API_URL")
 
+	// Conectar a RabbitMQ
 	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
 		log.Fatalf("Error al conectar a RabbitMQ: %v", err)
 	}
+	defer conn.Close()
 
 	ch, err := conn.Channel()
 	if err != nil {
 		log.Fatalf("Error al abrir canal: %v", err)
 	}
+	defer ch.Close()
 
-	// Declarar la cola "esp32"
-	q, err := ch.QueueDeclare(
-		"esp32", // nombre de la cola
-		true,    // durable
-		false,   // auto-delete
-		false,   // exclusivo
-		false,   // no-wait
-		nil,     // argumentos
+	// Declarar la cola "motion"
+	_, err = ch.QueueDeclare(
+		"motion",
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 	if err != nil {
 		log.Fatalf("Error al declarar la cola: %v", err)
 	}
 
+	// Consumir mensajes de la cola "motion"
 	msgs, err := ch.Consume(
-		q.Name, // nombre de la cola
-		"",     // consumer tag
-		true,   // auto-acknowledge
-		false,  // exclusivo
-		false,  // no-local
-		false,  // no-wait
-		nil,    // argumentos
+		"motion",
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 	if err != nil {
 		log.Fatalf("Error al consumir mensajes: %v", err)
 	}
 
+	
 	go func() {
 		for d := range msgs {
-			log.Printf("Mensaje recibido en cola 'esp32': %s", d.Body)
-
-			// Construir la URL de reenvío: se asume que el endpoint es /sensor/motion
+			log.Printf("Mensaje recibido en motion: %s", d.Body)
 			url := secondAPIURL + "/sensor/motion"
+
 			req, err := http.NewRequest("POST", url, bytes.NewBuffer(d.Body))
 			if err != nil {
 				log.Printf("Error al crear request HTTP: %v", err)
@@ -70,9 +72,12 @@ func ConsumeMotionQueue() {
 				log.Printf("Error al enviar request HTTP: %v", err)
 				continue
 			}
-			defer resp.Body.Close()
+			resp.Body.Close()
 
 			log.Printf("Mensaje reenviado a %s", url)
 		}
 	}()
+
+	log.Println("Escuchando en la cola motion...")
+	select {} // Bloquea la ejecución para que siga corriendo
 }
